@@ -20,13 +20,14 @@ def create_token(telegram_id: int) -> str:
         algorithm=ALGORITHM
     )
 
-DEV_MODE = os.getenv("DEV_MODE", "true").lower() == "true"
+# ✅ ИСПРАВЛЕНИЕ: DEV_MODE только для локальной разработки
+# На Railway должен быть DEV_MODE=false
+DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 
 @router.post("/auth/telegram")
 async def auth_telegram(body: AuthRequest):
     tg_user = None
 
-    # Режим разработки — принимаем mock данные
     if DEV_MODE and body.initData in ("mock_init_data_for_development", ""):
         tg_user = {
             "id": 123456789,
@@ -35,6 +36,7 @@ async def auth_telegram(body: AuthRequest):
         }
         print("[AUTH] DEV MODE: using mock user")
     else:
+        # ✅ ИСПРАВЛЕНИЕ: Всегда проверяем реальные данные Telegram
         tg_user = extract_user_from_init_data(body.initData)
 
     if not tg_user:
@@ -48,13 +50,27 @@ async def auth_telegram(body: AuthRequest):
     token = create_token(telegram_id)
 
     if existing:
-        return {"user": existing, "token": token, "registered": True}
+        # ✅ ИСПРАВЛЕНИЕ: Проверяем реально ли заполнен профиль
+        is_complete = bool(
+            existing.get("gender") and
+            existing.get("city") and
+            existing.get("age", 0) > 0 and
+            existing.get("name") and
+            existing.get("name") != existing.get("username", "")
+        )
+        return {
+            "user": existing,
+            "token": token,
+            "registered": is_complete  # ✅ Точная проверка
+        }
 
+    # ✅ ИСПРАВЛЕНИЕ: Новый юзер — НЕ сохраняем сразу
+    # Сохраняем только после завершения регистрации
     new_user = {
         "telegram_id": telegram_id,
         "username": tg_user.get("username", ""),
-        "name": tg_user.get("first_name", "Игрок"),
-        "age": 18,
+        "name": tg_user.get("first_name", ""),
+        "age": 0,           # ✅ 0 = не заполнено
         "gender": "",
         "city": "",
         "games": [],
@@ -69,7 +85,8 @@ async def auth_telegram(body: AuthRequest):
         "likes_today": 0,
         "last_like_reset": str(datetime.now().date()),
         "viewed_profiles": [],
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "profile_complete": False  # ✅ Флаг незавершённой регистрации
     }
     save_user(new_user)
     return {"user": new_user, "token": token, "registered": False}
