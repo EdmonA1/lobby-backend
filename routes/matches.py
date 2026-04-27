@@ -7,7 +7,7 @@ from utils.storage import get_user, get_user_matches
 router = APIRouter()
 security = HTTPBearer()
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         telegram_id = int(payload["sub"])
@@ -20,12 +20,24 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 @router.get("/matches")
 async def get_matches(user=Depends(get_current_user)):
+    """Получить мэтчи текущего пользователя"""
     user_matches = get_user_matches(user["telegram_id"])
-    hidden = ["likes_today", "last_like_reset", "viewed_profiles"]
+    
     result = []
     for m in user_matches:
         partner = get_user(m["partner_id"])
         if partner:
+            # Скрываем критичные данные
+            hidden = [
+                "likes_today",
+                "last_like_reset",
+                "viewed_profiles",
+                "is_registered"
+            ]
             safe = {k: v for k, v in partner.items() if k not in hidden}
-            result.append({"user": safe, "created_at": m["created_at"]})
+            result.append({
+                "user": safe,
+                "created_at": m["created_at"]
+            })
+    
     return {"matches": result}

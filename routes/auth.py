@@ -23,7 +23,7 @@ def create_token(telegram_id: int) -> str:
 async def auth_telegram(body: AuthRequest):
     tg_user = None
 
-    # Режим разработки — принимаем mock данные
+    # Режим разработки
     if DEV_MODE and body.initData in ("mock_init_data_for_development", ""):
         tg_user = {
             "id": 123456789,
@@ -41,13 +41,15 @@ async def auth_telegram(body: AuthRequest):
     if not telegram_id:
         raise HTTPException(status_code=401, detail="No user id in data")
 
-    # Проверяем есть ли уже пользователь
+    print(f"[AUTH] telegram_id={telegram_id}, username={tg_user.get('username')}")
+
+    # Проверяем есть ли пользователь по ID
     existing = get_user(telegram_id)
     token = create_token(telegram_id)
 
     if existing:
-        # Пользователь есть в БД
-        # Если он не полностью зарегистрирован — скажем это фронтенду
+        print(f"[AUTH] User exists: {existing.get('name')}")
+        # Проверяем завершена ли регистрация
         is_completed = (
             existing.get("gender") and 
             existing.get("age") and 
@@ -61,15 +63,17 @@ async def auth_telegram(body: AuthRequest):
             "completed": is_completed
         }
 
-    # Новый пользователь — создаём с минимальной информацией
+    print(f"[AUTH] Creating new user: {tg_user.get('first_name')}")
+    
+    # Новый пользователь
     new_user = {
         "telegram_id": telegram_id,
         "username": tg_user.get("username", ""),
         "name": tg_user.get("first_name", "Пользователь"),
-        "age": 0,  # ← Не заполнено
-        "gender": "",  # ← Не заполнено
-        "city": "",  # ← Не заполнено
-        "games": [],  # ← Не заполнено
+        "age": 0,
+        "gender": "",
+        "city": "",
+        "games": [],
         "bio": "",
         "discord": "",
         "photos": [],
@@ -81,10 +85,11 @@ async def auth_telegram(body: AuthRequest):
         "likes_today": 0,
         "last_like_reset": str(datetime.now().date()),
         "viewed_profiles": [],
-        "is_registered": False,  # ← НОВОЕ ПОЛЕ
+        "is_registered": False,
         "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     save_user(new_user)
+    
     return {
         "user": new_user,
         "token": token,
