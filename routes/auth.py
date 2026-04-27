@@ -2,10 +2,9 @@
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from jose import jwt
-from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_DAYS
+from config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_DAYS, DEV_MODE
 from utils.telegram_auth import extract_user_from_init_data
 from utils.storage import get_user, save_user
-import os
 
 router = APIRouter()
 
@@ -20,14 +19,11 @@ def create_token(telegram_id: int) -> str:
         algorithm=ALGORITHM
     )
 
-# ✅ ИСПРАВЛЕНИЕ: DEV_MODE только для локальной разработки
-# На Railway должен быть DEV_MODE=false
-DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
-
 @router.post("/auth/telegram")
 async def auth_telegram(body: AuthRequest):
     tg_user = None
 
+    # Режим разработки — принимаем mock данные
     if DEV_MODE and body.initData in ("mock_init_data_for_development", ""):
         tg_user = {
             "id": 123456789,
@@ -36,7 +32,6 @@ async def auth_telegram(body: AuthRequest):
         }
         print("[AUTH] DEV MODE: using mock user")
     else:
-        # ✅ ИСПРАВЛЕНИЕ: Всегда проверяем реальные данные Telegram
         tg_user = extract_user_from_init_data(body.initData)
 
     if not tg_user:
@@ -46,34 +41,35 @@ async def auth_telegram(body: AuthRequest):
     if not telegram_id:
         raise HTTPException(status_code=401, detail="No user id in data")
 
+    # Проверяем есть ли уже пользователь
     existing = get_user(telegram_id)
     token = create_token(telegram_id)
 
     if existing:
-        # ✅ ИСПРАВЛЕНИЕ: Проверяем реально ли заполнен профиль
-        is_complete = bool(
-            existing.get("gender") and
+        # Пользователь есть в БД
+        # Если он не полностью зарегистрирован — скажем это фронтенду
+        is_completed = (
+            existing.get("gender") and 
+            existing.get("age") and 
             existing.get("city") and
-            existing.get("age", 0) > 0 and
-            existing.get("name") and
-            existing.get("name") != existing.get("username", "")
+            len(existing.get("games", [])) > 0
         )
         return {
             "user": existing,
             "token": token,
-            "registered": is_complete  # ✅ Точная проверка
+            "registered": True,
+            "completed": is_completed
         }
 
-    # ✅ ИСПРАВЛЕНИЕ: Новый юзер — НЕ сохраняем сразу
-    # Сохраняем только после завершения регистрации
+    # Новый пользователь — создаём с минимальной информацией
     new_user = {
         "telegram_id": telegram_id,
         "username": tg_user.get("username", ""),
-        "name": tg_user.get("first_name", ""),
-        "age": 0,           # ✅ 0 = не заполнено
-        "gender": "",
-        "city": "",
-        "games": [],
+        "name": tg_user.get("first_name", "Пользователь"),
+        "age": 0,  # ← Не заполнено
+        "gender": "",  # ← Не заполнено
+        "city": "",  # ← Не заполнено
+        "games": [],  # ← Не заполнено
         "bio": "",
         "discord": "",
         "photos": [],
@@ -85,8 +81,13 @@ async def auth_telegram(body: AuthRequest):
         "likes_today": 0,
         "last_like_reset": str(datetime.now().date()),
         "viewed_profiles": [],
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "profile_complete": False  # ✅ Флаг незавершённой регистрации
+        "is_registered": False,  # ← НОВОЕ ПОЛЕ
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     save_user(new_user)
-    return {"user": new_user, "token": token, "registered": False}
+    return {
+        "user": new_user,
+        "token": token,
+        "registered": False,
+        "completed": False
+    }
